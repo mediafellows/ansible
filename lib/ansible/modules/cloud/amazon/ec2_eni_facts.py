@@ -13,11 +13,6 @@
 # You should have received a copy of the GNU General Public License
 # along with this library.  If not, see <http://www.gnu.org/licenses/>.
 
-ANSIBLE_METADATA = {'metadata_version': '1.0',
-                    'status': ['preview'],
-                    'supported_by': 'community'}
-
-
 DOCUMENTATION = '''
 ---
 module: ec2_eni_facts
@@ -29,8 +24,7 @@ author: "Rob White (@wimnat)"
 options:
   filters:
     description:
-      - A dict of filters to apply. Each dict item consists of a filter key and a filter value.
-        See U(http://docs.aws.amazon.com/AWSEC2/latest/APIReference/API_DescribeNetworkInterfaces.html) for possible filters.
+      - A dict of filters to apply. Each dict item consists of a filter key and a filter value. See U(http://docs.aws.amazon.com/AWSEC2/latest/APIReference/API_DescribeNetworkInterfaces.html) for possible filters.
     required: false
     default: null
 
@@ -58,41 +52,6 @@ try:
     HAS_BOTO = True
 except ImportError:
     HAS_BOTO = False
-
-try:
-    import boto3
-    from botocore.exceptions import ClientError, NoCredentialsError
-    HAS_BOTO3 = True
-except ImportError:
-    HAS_BOTO3 = False
-
-from ansible.module_utils.basic import AnsibleModule
-from ansible.module_utils.ec2 import (AnsibleAWSError,
-        ansible_dict_to_boto3_filter_list, boto3_conn,
-        boto3_tag_list_to_ansible_dict, camel_dict_to_snake_dict,
-        connect_to_aws, ec2_argument_spec, get_aws_connection_info)
-
-
-def list_ec2_eni_boto3(connection, module):
-
-    if module.params.get("filters") is None:
-        filters = []
-    else:
-        filters = ansible_dict_to_boto3_filter_list(module.params.get("filters"))
-
-    try:
-        network_interfaces_result = connection.describe_network_interfaces(Filters=filters)['NetworkInterfaces']
-    except (ClientError, NoCredentialsError) as e:
-        module.fail_json(msg=e.message)
-
-    # Modify boto3 tags list to be ansible friendly dict and then camel_case
-    camel_network_interfaces = []
-    for network_interface in network_interfaces_result:
-        network_interface['TagSet'] = boto3_tag_list_to_ansible_dict(network_interface['TagSet'])
-        camel_network_interfaces.append(camel_dict_to_snake_dict(network_interface))
-
-    module.exit_json(network_interfaces=camel_network_interfaces)
-
 
 def get_eni_info(interface):
 
@@ -161,28 +120,20 @@ def main():
     if not HAS_BOTO:
         module.fail_json(msg='boto required for this module')
 
-    if HAS_BOTO3:
-        region, ec2_url, aws_connect_params = get_aws_connection_info(module, boto3=True)
+    region, ec2_url, aws_connect_params = get_aws_connection_info(module)
 
-        if region:
-            connection = boto3_conn(module, conn_type='client', resource='ec2', region=region, endpoint=ec2_url, **aws_connect_params)
-        else:
-            module.fail_json(msg="region must be specified")
-
-        list_ec2_eni_boto3(connection, module)
+    if region:
+        try:
+            connection = connect_to_aws(boto.ec2, region, **aws_connect_params)
+        except (boto.exception.NoAuthHandlerFound, AnsibleAWSError), e:
+            module.fail_json(msg=str(e))
     else:
-        region, ec2_url, aws_connect_params = get_aws_connection_info(module)
+        module.fail_json(msg="region must be specified")
 
-        if region:
-            try:
-                connection = connect_to_aws(boto.ec2, region, **aws_connect_params)
-            except (boto.exception.NoAuthHandlerFound, AnsibleAWSError) as e:
-                module.fail_json(msg=str(e))
-        else:
-            module.fail_json(msg="region must be specified")
+    list_eni(connection, module)
 
-        list_eni(connection, module)
-
+from ansible.module_utils.basic import *
+from ansible.module_utils.ec2 import *
 
 if __name__ == '__main__':
     main()

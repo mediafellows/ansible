@@ -13,11 +13,6 @@
 # You should have received a copy of the GNU General Public License
 # along with this library.  If not, see <http://www.gnu.org/licenses/>.
 
-ANSIBLE_METADATA = {'metadata_version': '1.0',
-                    'status': ['stableinterface'],
-                    'supported_by': 'curated'}
-
-
 DOCUMENTATION = '''
 ---
 module: ec2_vpc_subnet_facts
@@ -29,10 +24,15 @@ author: "Rob White (@wimnat)"
 options:
   filters:
     description:
-      - A dict of filters to apply. Each dict item consists of a filter key and a filter value.
-        See U(http://docs.aws.amazon.com/AWSEC2/latest/APIReference/API_DescribeSubnets.html) for possible filters.
+      - A dict of filters to apply. Each dict item consists of a filter key and a filter value. See U(http://docs.aws.amazon.com/AWSEC2/latest/APIReference/API_DescribeSubnets.html) for possible filters.
     required: false
     default: null
+  sort:
+    description:
+      - Optional attribute which with to sort the results.
+    choices: ['id', 'cidr_block', 'availability_zone']
+    default: null
+    required: false
 extends_documentation_fragment:
     - aws
     - ec2
@@ -71,7 +71,6 @@ EXAMPLES = '''
     - publicA
     - publicB
     - publicC
-  register: subnet_facts
 
 - set_fact:
     subnet_ids: "{{ subnet_facts.results|map(attribute='subnets.0.id')|list }}"
@@ -90,24 +89,25 @@ from ansible.module_utils.ec2 import AnsibleAWSError, connect_to_aws, ec2_argume
 
 def get_subnet_info(subnet):
 
-    subnet_info = {'id': subnet.id,
-                   'availability_zone': subnet.availability_zone,
-                   'available_ip_address_count': subnet.available_ip_address_count,
-                   'cidr_block': subnet.cidr_block,
-                   'default_for_az': subnet.defaultForAz,
-                   'map_public_ip_on_launch': subnet.mapPublicIpOnLaunch,
-                   'state': subnet.state,
-                   'tags': subnet.tags,
-                   'vpc_id': subnet.vpc_id}
+    subnet_info = { 'id': subnet.id,
+                    'availability_zone': subnet.availability_zone,
+                    'available_ip_address_count': subnet.available_ip_address_count,
+                    'cidr_block': subnet.cidr_block,
+                    'default_for_az': subnet.defaultForAz,
+                    'map_public_ip_on_launch': subnet.mapPublicIpOnLaunch,
+                    'state': subnet.state,
+                    'tags': subnet.tags,
+                    'vpc_id': subnet.vpc_id
+                  }
 
     return subnet_info
-
 
 def list_ec2_vpc_subnets(connection, module):
 
     filters = module.params.get("filters")
-    subnet_dict_array = []
+    sort    = module.params.get("sort")
 
+    subnet_dict_array = []
     try:
         all_subnets = connection.get_all_subnets(filters=filters)
     except BotoServerError as e:
@@ -116,6 +116,9 @@ def list_ec2_vpc_subnets(connection, module):
     for subnet in all_subnets:
         subnet_dict_array.append(get_subnet_info(subnet))
 
+    if sort:
+        subnet_dict_array.sort(key=lambda e: e[sort])
+
     module.exit_json(subnets=subnet_dict_array)
 
 
@@ -123,12 +126,13 @@ def main():
     argument_spec = ec2_argument_spec()
     argument_spec.update(
         dict(
-            filters=dict(default=None, type='dict')
+            filters = dict(default=None, type='dict'),
+            sort = dict(required=False, default=None,
+                choices=['id', 'cidr_block', 'availability_zone'])
         )
     )
 
-    module = AnsibleModule(argument_spec=argument_spec,
-                           supports_check_mode=True)
+    module = AnsibleModule(argument_spec=argument_spec)
 
     if not HAS_BOTO:
         module.fail_json(msg='boto required for this module')
